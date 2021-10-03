@@ -1,4 +1,6 @@
-# Haiti_Earthquake_Relief_2010
+#Earthquake
+
+Haiti_Earthquake_Relief_2010
 
 Analyzing data from Haiti Earthquake Relief Effort from 2010.
 

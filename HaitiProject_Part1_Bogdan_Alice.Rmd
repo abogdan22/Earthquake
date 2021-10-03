@@ -1,0 +1,948 @@
+---
+title: "HaitiProject_Part1_Bogdan_Alice"
+author: |
+  | Name: Alice Bogdan
+  | 
+  | 
+date: "`r format(Sys.Date(), '%b %d, %Y')`"
+output:
+  html_document:
+    number_sections: true    
+    toc: true
+    toc_float: true
+    theme: lumen
+    highlight: default  
+---
+
+```{r rounding, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+op = function(x, d=2) sprintf(paste0("%1.",d,"f"), x) 
+```
+<!--- Change font sizes (or other css modifications) --->
+<style>
+h1.title {
+  font-size: 2.2em; /* Title font size */
+}
+h1 {
+  font-size: 2em;   /* Header 1 font size */
+}
+h2 {
+  font-size: 1.5em;
+}
+h3 { 
+  font-size: 1.2em;
+}
+pre {
+  font-size: 0.8em;  /* Code and R output font size */
+}
+</style>
+# Libraries  
+```{r chunk lib}
+#libraries
+library(MASS)
+library(boot)
+#library(Edcat)
+#library(dyplyr)
+library(corrplot)
+library(class)
+library(plyr)
+library(caret)
+library(ggplot2)
+library(hrbrthemes)
+library(gridExtra)
+```
+
+# Data   
+```{r chunk data}
+#load data set
+haiti <- read.csv("HaitiPixels.csv", header = TRUE, sep = ",", stringsAsFactors = T)
+#convert data to an actual data frame (from tibble)
+haiti <- as.data.frame(haiti)
+attach(haiti)
+
+#convert Class to type factor
+class(haiti$Class)
+haiti$Class <- as.factor(haiti$Class)
+class(haiti$Class)
+levels(haiti$Class) #Blue Tarp, Rooftop, Soil, Various Non-Tarp, Vegetation
+
+#data set to use when using caret library
+haiti.caret <- haiti
+haiti.caret$BinClass <- ifelse(haiti.caret$Class == "Blue Tarp", "Blue", "Other")
+#sum(haiti.caret$BinClass == "Other") #61219
+#sum(haiti.caret$BinClass == "Blue Tarp") #2022
+#convert outcome variable to type factor
+class(haiti.caret$BinClass)
+haiti.caret$BinClass <- as.factor(haiti.caret$BinClass)
+class(haiti.caret$BinClass)
+
+#Binary classification
+haiti$BinClass <- ifelse(haiti$Class == "Blue Tarp", 1, 0)
+#sum(haiti$BinClass == 0) #61219
+#sum(haiti$BinClass == 1) #2022
+#convert to factor type
+class(haiti$BinClass)
+haiti$BinClass <- as.factor(haiti$BinClass)
+class(haiti$BinClass)
+```
+# EDA  
+```{r chunk EDA}
+#count for Class
+with(haiti,table(Class))
+#with(haiti.caret,table(Class))
+#count for BinClass
+with(haiti,table(BinClass))
+#with(haiti.caret,table(BinClass))
+
+#min values for RGB
+min(haiti$Blue)
+min(haiti$Green)
+min(haiti$Red)
+#max values for RGB
+max(haiti$Blue)
+max(haiti$Green)
+max(haiti$Red)
+
+#levels of Class
+levels(haiti$Class)
+
+#scatterplot (Class)
+ggplot(haiti, aes(x=Red, y=Blue, color=Class)) + 
+  geom_point(size=1) +
+  theme_ipsum() +
+  ggtitle("Scatterplot: Class")
+#scatterplot (Class)
+ggplot(haiti, aes(x=Red, y=Blue, color=BinClass)) + 
+  geom_point(size=1) +
+  theme_ipsum() +
+  ggtitle("Scatterplot: Binary Class")
+
+#boxplots original classifications
+#red
+red.box <- ggplot(data = haiti, aes(x = Class, y = Red)) + 
+  geom_boxplot(fill = "red", alpha = 0.5) + 
+  ggtitle("Boxplot for Red")
+#green
+green.box <- ggplot(data = haiti, aes(x = Class, y = Green)) + 
+  geom_boxplot(fill = "green", alpha = 0.2) + 
+  ggtitle("Boxplot for Green")
+#blue
+blue.box <- ggplot(data = haiti, aes(x = Class, y = Blue)) + 
+  geom_boxplot(fill = "lightblue", alpha = 0.75) + 
+  ggtitle("Figure 1: Boxplot for Blue")
+red.box
+green.box
+blue.box
+
+#boxplots binary classifications
+#red
+red.box.bin <- ggplot(data = haiti, aes(x = BinClass, y = Red)) + 
+  geom_boxplot(fill = "red", alpha = 0.5) + 
+  ggtitle("Boxplot for Red (Binary)") + 
+  scale_x_discrete(labels=c("Other", "Blue Tarp")) +
+  xlab("Class")
+#green
+green.box.bin <- ggplot(data = haiti, aes(x = BinClass, y = Green)) + 
+  geom_boxplot(fill = "green", alpha = 0.2) + 
+  ggtitle("Boxplot for Green (Binary)") + 
+  scale_x_discrete(labels=c("Other", "Blue Tarp")) +
+  xlab("Class")
+#blue
+blue.box.bin <- ggplot(data = haiti, aes(x = BinClass, y = Blue)) + 
+  geom_boxplot(fill = "lightblue", alpha = 0.75) + 
+  ggtitle("Boxplot for Blue (Binary)") + 
+  scale_x_discrete(labels=c("Other", "Blue Tarp")) +
+  xlab("Class")
+grid.arrange(red.box.bin, green.box.bin, blue.box.bin, ncol = 3)
+
+```
+
+# Logistic Regression  
+
+## Binary Logistic Regression  
+Working with a few different models:  
+BinClass ~ Blue + Red + Green  
+BinClass ~ Blue * Red * Green  
+```{r chunk logistic regression}
+#create vector to store CV accuracy rates
+cv.accuracy.log <- rep(0,10)
+
+#function for k-fold cross validation for logistic regression
+#inputs:
+#data: dataset to run CV on
+#model: logistic regression using binary response variable (no interaction effects)
+#K = 10 : split the data into 10 sets
+#seed: set seed for reproducibility
+cv.log <-
+  function (data, model= BinClass ~ Blue + Red + Green, yname="BinClass", K=10, seed=100) {
+    n <- nrow(data) #number of observations
+    set.seed(seed)
+    datay <- data[,yname] #response variable
+    library(MASS)
+    #partition the data into K subsets
+    f <- ceiling(n/K)
+    s <- sample(rep(1:K, f), n)  
+    #generate indices 1:10 and sample n of them  
+    
+    # create a vector of size K with all 0 entries
+    cv.accuracy.log  <- rep(0,K)
+    
+    # K fold cross-validation
+    for (i in 1:K) {
+      test.index <- seq_len(n)[(s == i)] #test data (i out of K)
+      train.index <- seq_len(n)[(s != i)] #training data (K subsets excluding i)
+      
+      #model with training data
+      log.fit <- glm(model, data=data[train.index, ], family = binomial)
+      #observed test set y
+      log.y <- data[test.index, yname]
+      #predictions for each individual in validation set. 
+      log.pred <-  rep(0, f) #vector of size f with all 0s
+      log.probs <- predict(log.fit, haiti[test.index,], type = "response") #probability prediction
+      log.pred[log.probs > 0.5] <- 1 #based on probability, assign 1 if probability greater than 0.5
+      log.accuracy <- mean(log.pred == log.y) #check to to see if the predictions match the true classification
+      
+      #add accuracy value to cv.accuracy.log vector
+      cv.accuracy.log[i] <- log.accuracy
+      #confusion matrix
+      #confusion.matrix <- table(log.y, log.pred)
+      #TN_r <- confusion.matrix[1][1]
+      #FN_r <- confusion.matrix[2][1]
+      #FP_r <- confusion.matrix[3][1]
+      #TP_r <- confusion.matrix[4][1]
+    }
+    #Output
+    list(call = model, K = K, cv.accuracy.log = cv.accuracy.log,
+         log.accuracy = mean(cv.accuracy.log), seed = seed)  
+  }
+
+log.reg.output <- cv.log(haiti)
+log.reg.output
+```
+The accuracy for the additive logistic regression model is `r op(log.reg.output$log.accuracy*100)`%.  
+
+## Binary Logistic Regression working with caret library  
+```{r chunk logistic regression using caret}
+library(caret)
+haiti.caret.bin <- haiti.caret[,-1]
+levels(haiti.caret.bin$BinClass)
+class(haiti.caret.bin$BinClass)
+
+#set seed for partition
+set.seed(100)
+#split data
+Train <- createDataPartition(haiti.caret.bin$BinClass, p = 0.8, list = FALSE, times = 1)
+train <- haiti.caret.bin[Train, ]
+test <- haiti.caret.bin[-Train, ]
+
+#make BinClass numeric for train/test sets
+#train.BinClass <- ifelse(train$BinClass == "Other", 0, 1)
+#train.numeric <- train[,-4]
+#train.numeric$train.BinClass <- train.BinClass
+
+#test.BinClass <- ifelse(test$BinClass == "Other", 0, 1)
+#test.numeric <- test[,-4]
+#test.numeric$test.BinClass <- test.BinClass
+
+#specify type of training method & number of folds
+ctrl <- trainControl(method = "cv", number = 10, 
+                     savePredictions = "all",
+                     classProbs = TRUE)
+
+#ctrl.roc <- trainControl(method = "cv", number = 10, 
+                     #savePredictions = "all",
+                     #classProbs = TRUE)
+#set random seed
+set.seed(100)
+
+
+
+#specify logistic regression model
+model.log <- train(BinClass ~ Red + Green + Blue,  
+                   data = train, 
+                   method = "glm", family = binomial,
+                   trControl = ctrl)
+
+#model.log.roc <- train(make.names(BinClass) ~ Red + Green + Blue,  
+                   #data = train, 
+                   #method = "glm", family = binomial,
+                   #trControl = ctrl.roc,
+                   #positive = "Blue Tarp",
+                   #metric = "ROC")
+
+print(model.log)
+#Kappa "rules of thumb" for interpretation
+#0.81-1.00: "almost perfect
+#0.61-0.80 Substantial
+#0.41-0.6 Moderate
+#0.21-0.4 Fair
+#0.00-0.2 Slight
+# > 0.00 Poor
+
+#accuracy: proportion of total correctly classified cases over all (correctly classified into true Blue tarp and true other) 99.53%
+#kappa: takes into consideration baseline of model without predictors
+#what are the baseline probabilities
+
+#output in terms of regression coefficients
+summary(model.log)
+
+#variable importance (predictor variables)
+varImp(model.log) 
+#green least important for determining Blue Tarp. Blue carried most importance
+
+###apply model to testing
+
+#predict outcome using model from training applied to testing
+pred <- predict(model.log, newdata = test) #how well does model predict Blue Tarp
+
+#create confusion matrix
+confusionMatrix(data = pred, test$BinClass)
+#accuracy: 99.41%
+#specificity/TNR (TN/(TN+FP)): 99.85% (correctly classified Other)
+#sensitivity/TPR [TP/(TP+FN)]: 86.14% (correctly classified Blue Tarps) *the number of correct positive predictions divided by the total number of positives
+#https://www.rdocumentation.org/packages/caret/versions/6.0-88/topics/confusionMatrix
+
+###confusion matrix notes
+##                                   | True "Yes" (y=1)  | True "No" (y=0) 
+## Model classifies as "Yes" (y^=1)  |  TP               |  FP
+## Model classifies as "No" (y^=0)   |  FN               |  TN
+
+```
+**Binary Logistic Regression ROC and AUC**  
+```{r chunk Logistic Regression ROC and AUC (stat 6021 method)}
+library(pROC)
+library(ROCR)
+#set seed for partition
+set.seed(100)
+#split data
+Train.roc <- createDataPartition(haiti$BinClass, p = 0.8, list = FALSE, times = 1)
+train.roc <- haiti[Train.roc, ]
+test.roc <- haiti[-Train.roc, ]
+
+#fit model to train data WITHOUT k-fold cv
+log.model.roc <- glm(BinClass ~ Red + Green + Blue, data = train.roc, family = binomial)
+#breakdown of observations for test set
+as.data.frame(table(test.roc$BinClass))
+#predictions
+pred.log.roc <- predict(log.model.roc, newdata = test.roc, type="response") 
+#produce the numbers associated with classification table
+rates.log.roc <- prediction(pred.log.roc, test.roc$BinClass)
+#store the true positive and false positive rates
+roc.result.log <- performance(rates.log.roc, measure="tpr", x.measure="fpr") #sets up ROC curve
+
+##plot ROC curve and overlay the diagonal line for random guessing
+plot(roc.result.log, main="ROC Curve for Logistic Regression (Binary)", col = "#377eb8", lwd =4) #produces ROC curve
+lines(x = c(0,1), y = c(0,1), col="red") 
+
+##compute the AUC
+auc.log <- performance(rates.log.roc, measure = "auc")
+auc.log@y.values #0.9988632
+round.auc.log <- auc.log@y.values
+round.auc.log <- as.numeric(round.auc.log)
+round.auc.log <- round(round.auc.log*100,2)
+```
+The AUC value is `r round.auc.log`%.  
+```{r chunk log roc and auc (video)}
+#set seed for partition
+set.seed(100)
+#split data
+#Train.roc <- createDataPartition(haiti$BinClass, p = 0.8, list = FALSE, times = 1)
+#train.roc <- haiti[Train.roc, ]
+#test.roc <- haiti[-Train.roc, ]
+
+#fit model to train data WITHOUT k-fold cv
+#log.model.roc <- glm(BinClass ~ Red + Green + Blue, data = train.roc, family = binomial)
+
+#observed test set y
+log.roc.y <- train.roc[, "BinClass"]
+
+#predictions for each individual in validation set. 
+log.probs.roc <- predict(log.model.roc, test.roc, type = "response") #probability prediction
+
+#produce the numbers associated with classification table
+rates.log.roc2 <- prediction(log.probs.roc, test.roc$BinClass)
+
+#plot ROC curve. set plot to s ("square")
+par(pty = "s")
+roc(as.numeric(test.roc$BinClass), as.numeric(log.probs.roc), plot = TRUE,
+    legacy.axes = TRUE, percent = TRUE,
+    xlab = "FPR", ylab = "TPR", main = "ROC Plot for Logistic Regression (Binary)",
+    col = "#377eb8", lwd =4)
+
+roc.info.log <- roc(as.numeric(test.roc$BinClass), as.numeric(log.probs.roc), plot = TRUE)
+roc.df <- data.frame(
+  tpp = roc.info.log$sensitivities*100,
+  fpp = (1-roc.info.log$specificities)*100,
+  thresholds = roc.info.log$thresholds)
+
+auc.log2 <- performance(rates.log.roc2, measure = "auc")
+```
+## Binary Logistic Regression with interactions    
+```{r chunk logistic regression using caret (interactions)}
+#data set to use
+#haiti.caret.bin
+
+#set seed for partition
+set.seed(100)
+#split data
+#Train <- createDataPartition(haiti.caret.bin$BinClass, p = 0.8, list = FALSE, times = 1)
+#train <- haiti.caret.bin[Train, ]
+#test <- haiti.caret.bin[-Train, ]
+
+#specify type of training method & number of folds
+ctrl <- trainControl(method = "cv", number = 10, 
+                     savePredictions = "all",
+                     classProbs = FALSE)
+#set random seed
+set.seed(100)
+
+#specify logistic regression model
+model.log.inter <- train(BinClass ~ Red*Green*Blue,  
+                   data = train, 
+                   method = "glm", family = binomial,
+                   trControl = ctrl)
+```
+
+The model statistics for Model 1c are:  
+```{r chunk Model 1c model statistics}
+print(model.log.inter)
+#accuracy: 99.59%
+```
+
+The summary output for Model 1c:  
+```{r chunk Model 1c summary output}
+#output in terms of regression coefficients
+summary(model.log.inter)
+```
+
+```{r chunk Model 1c variable importance}
+#variable importance (predictor variables)
+varImp(model.log.inter) 
+#green least important for determining Blue Tarp. Blue carried most importance
+```
+The Blue variable carried the most importance while the green variable carried the least importance in determing Blue Tarps for Model 1c.  
+
+The confusion matrix for Model 1c is:  
+```{r chunk Model 1c testing}
+###apply model to testing
+
+#predict outcome using model from training applied to testing
+pred.log.inter <- predict(model.log.inter, newdata = test) #how well does model predict Blue Tarp
+
+#create confusion matrix
+confusionMatrix(data = pred.log.inter, test$BinClass)
+#accuracy: 99.55%
+#sensitivity/TPR [TP/(TP+FN)]: 90.59% 
+#specificity/TNR (TN/(TN+FP)): 99.85% 
+```
+Notice, the sensitivity for Model 1c is better than Model 1b. Model 1c does better at classifying Blue Tarps than Model 1b.   
+
+## Multinomial Logistic Regression  
+```{r chunk logistic regression using caret (original classification)}
+#data set to use
+#haiti.caret.bin
+
+#set seed for partition
+set.seed(100)
+#split data
+Train.org <- createDataPartition(haiti.caret$Class, p = 0.8, list = FALSE, times = 1)
+train.org <- haiti.caret[Train.org, ]
+test.org <- haiti.caret[-Train.org, ]
+
+#specify type of training method & number of folds
+ctrl <- trainControl(method = "cv", number = 10, 
+                     savePredictions = "all",
+                     classProbs = FALSE)
+#set random seed
+set.seed(100)
+
+#specify logistic regression model
+model.log.org <- train(Class ~ Red+Green+Blue,  
+                   data = train.org, 
+                   method = "multinom",
+                   trControl = ctrl)
+```
+
+The model statistics for Model 1d are:  
+```{r chunk Model 1d model statistics}
+print(model.log.org)
+#accuracy: 88.64%
+```
+
+The summary output for Model 1d:  
+```{r chunk Model 1d summary output}
+#output in terms of regression coefficients
+summary(model.log.org)
+```
+
+```{r chunk Model 1d variable importance}
+#variable importance (predictor variables)
+varImp(model.log.org) 
+#green least important for determining Blue Tarp. Blue carried most importance
+```
+The Blue variable carried the most importance while the green variable carried the least importance in determing Blue Tarps for Model 1d.  
+
+The confusion matrix for Model 1d is:  
+```{r chunk Model 1d testing}
+###apply model to testing
+
+#predict outcome using model from training applied to testing
+pred.log.org <- predict(model.log.org, newdata = test.org) #how well does model predict Blue Tarp
+
+#create confusion matrix
+confusionMatrix(data = pred.log.org, test.org$Class)
+#accuracy: 88.73%
+#sensitivity/TPR [TP/(TP+FN)]: 91.58% 
+#specificity/TNR (TN/(TN+FP)): 99.82% 
+```
+Notice, all the summary statistics (accuracy, sensitivity, specificity) are all lower for multinomial logistic regression than binomial logistic regression for classifying blue tarps.  
+```{r chunk logistic regression (original) ROC and AUC}
+library(nnet) #multinomial
+# Classification with logistic regression 
+pred.log.org <-  predict(model.log.org, test.org, type = "prob")
+
+# determine the AUC
+multiclass.roc(test.org$Class, pred.log.org)
+# AUC = 0.923
+```
+# LDA  
+## LDA Binary Classification  
+The LDA model using binary classification for Class will be referred to as Model 2a.  
+```{r chunk LDA Model 2a}
+set.seed(100)
+#split data
+#Train <- createDataPartition(haiti.caret.bin$BinClass, p = 0.8, list = FALSE, times = 1)
+#train <- haiti.caret.bin[Train, ]
+#test <- haiti.caret.bin[-Train, ]
+
+#specify type of training method & number of folds
+#ctrl <- trainControl(method = "cv", number = 10, savePredictions = "all", classProbs = FALSE)
+#set random seed
+set.seed(100)
+
+#specify logistic regression model
+model.lda <- train(BinClass ~ Red + Green + Blue,  
+                   data = train, 
+                   method = "lda",
+                   trControl = ctrl)
+```
+
+Model 2a statistics:  
+```{r chunk Model 2a model statistics}
+print(model.lda)
+```
+
+The confusion matrix for Model 2a is:  
+```{r chunk Model 2a testing}
+###apply model to testing
+
+#predict outcome using model from training applied to testing
+pred.lda <- predict(model.lda, newdata = test) #how well does model predict Blue Tarp
+
+#create confusion matrix
+confusionMatrix(data = pred.lda, test$BinClass)
+#accuracy: 98.21%
+
+pred.accuracy.lda <- round(mean(pred.lda == test$BinClass)*100,2)
+```
+The accuracy for Model 2a is `r pred.accuracy.lda`%.  
+
+```{r chunk LDA ROC and AUC (DS 6030 method)}
+library(pROC)
+#set seed for partition
+set.seed(100)
+#split data
+#Train.roc <- createDataPartition(haiti$BinClass, p = 0.8, list = FALSE, times = 1)
+#train.roc <- haiti[Train.roc, ]
+#test.roc <- haiti[-Train.roc, ]
+
+#fit model to train data WITHOUT k-fold cv
+lda.model.roc <- lda(BinClass ~ Red + Green + Blue, data = train.roc)
+#breakdown of observations for test set
+as.data.frame(table(test.roc$BinClass))
+#predictions
+pred.lda.roc <- predict(lda.model.roc, newdata = test.roc) 
+#prediction classifications
+lda.class.roc <- pred.lda.roc$class
+#get posteriors as a data frame
+lda.pred.posteriors <- as.data.frame(pred.lda.roc$posterior)
+#evaluate the model
+lda.pred <- prediction(lda.pred.posteriors[,2], test.roc$BinClass)
+#store the true positive and false positive rates
+lda.roc.perf <- performance(lda.pred, measure = "tpr", x.measure = "fpr")
+
+#AUC
+lda.auc <- performance(lda.pred, measure = "auc")
+lda.auc <- lda.auc@y.values
+round.lda.auc <- as.numeric(lda.auc)
+round.lda.auc <- round(round.lda.auc*100,2)
+
+##plot ROC curve and overlay the diagonal line for random guessing
+plot(lda.roc.perf, main="ROC Curve for LDA (Binary)", col = "#377eb8", lwd =4) #produces ROC curve
+lines(x = c(0,1), y = c(0,1), col="red") 
+```
+The AUC for the LDA model with binary classification is `r round.lda.auc`%.  
+
+## LDA Original Classification  
+The LDA model using the original data set classification for Class will be referred to as Model 2b.  
+```{r chunk LDA Model 2b}
+set.seed(100)
+#split data
+Train.org <- createDataPartition(haiti.caret$Class, p = 0.8, list = FALSE, times = 1)
+train.org <- haiti.caret[Train, ]
+test.org <- haiti.caret[-Train, ]
+
+#remove binary classification
+train.org <- train.org[, -5]
+test.org <- test.org[, -5]
+
+#specify type of training method & number of folds
+ctrl.org <- trainControl(method = "cv", number = 10, 
+                         savePredictions = "all",
+                         classProbs = FALSE)
+#set random seed
+set.seed(100)
+
+#specify logistic regression model
+model.lda.org <- train(Class ~ Red + Green + Blue,  
+                   data = train.org, 
+                   method = "lda",
+                   trControl = ctrl.org)
+```
+
+Model 2b statistics:  
+```{r chunk Model 2b model statistics}
+print(model.lda.org)
+```
+
+The confusion matrix for Model 2b is:  
+```{r chunk Model 2b testing}
+###apply model to testing
+
+#predict outcome using model from training applied to testing
+pred.lda.org <- predict(model.lda.org, newdata = test.org) #how well does model predict Blue Tarp
+
+#create confusion matrix
+confusionMatrix(data = pred.lda.org, test.org$Class)
+#accuracy: 98.21%
+
+pred.accuracy.lda.org <- round(mean(pred.lda.org == test.org$Class)*100,2)
+```
+The accuracy for Model 2b is `r pred.accuracy.lda.org`%.  
+We can tell that the accuracy drastically improves when we model LDA using the binary classification versus the original classification. Choosing between the two models, it would be best to use Model 2a.  
+
+```{r chunk LDA (original) ROC and AUC}
+library(nnet) #multinomial
+# Classification with logistic regression 
+pred.lda.org <-  predict(model.lda.org, test.org, type = "prob")
+
+# determine the AUC
+multiclass.roc(test.org$Class, pred.lda.org)
+# AUC = 0.9095
+```
+
+# QDA  
+## QDA Binary Classification  
+The QDA model using the binary classification for Class will be referred to as Model 3a.  
+```{r chunk QDA Model 3a}
+set.seed(100)
+#split data
+#Train <- createDataPartition(haiti.caret.bin$BinClass, p = 0.8, list = FALSE, times = 1)
+#train <- haiti.caret.bin[Train, ]
+#test <- haiti.caret.bin[-Train, ]
+
+#specify type of training method & number of folds
+#ctrl <- trainControl(method = "cv", number = 10, savePredictions = "all", classProbs = FALSE)
+#set random seed
+set.seed(100)
+
+#specify logistic regression model
+model.qda <- train(BinClass ~ Red + Green + Blue,  
+                   data = train, 
+                   method = "qda",
+                   trControl = ctrl)
+```
+
+Model 3a statistics:  
+```{r chunk Model 3a model statistics}
+print(model.qda)
+```
+
+The confusion matrix for Model 3a is:  
+```{r chunk Model 3a testing}
+###apply model to testing
+
+#predict outcome using model from training applied to testing
+pred.qda <- predict(model.qda, newdata = test) #how well does model predict Blue Tarp
+
+#create confusion matrix
+confusionMatrix(data = pred.qda, test$BinClass)
+#accuracy: 98.28%
+
+pred.accuracy.qda <- round(mean(pred.qda == test$BinClass)*100,2)
+```
+The accuracy for Model 3a is `r pred.accuracy.qda`%.  
+
+```{r chunk QDA ROC and AUC (DS 6030 method)}
+library(pROC)
+#set seed for partition
+set.seed(100)
+#split data
+#Train.roc <- createDataPartition(haiti$BinClass, p = 0.8, list = FALSE, times = 1)
+#train.roc <- haiti[Train.roc, ]
+#test.roc <- haiti[-Train.roc, ]
+
+#fit model to train data WITHOUT k-fold cv
+qda.model.roc <- qda(BinClass ~ Red + Green + Blue, data = train.roc)
+#breakdown of observations for test set
+as.data.frame(table(test.roc$BinClass))
+#predictions
+pred.qda.roc <- predict(qda.model.roc, newdata = test.roc) 
+#prediction classifications
+qda.class.roc <- pred.qda.roc$class
+#get posteriors as a data frame
+qda.pred.posteriors <- as.data.frame(pred.qda.roc$posterior)
+#evaluate the model
+qda.pred <- prediction(qda.pred.posteriors[,2], test.roc$BinClass)
+#store the true positive and false positive rates
+qda.roc.perf <- performance(qda.pred, measure = "tpr", x.measure = "fpr")
+
+#AUC
+qda.auc <- performance(qda.pred, measure = "auc")
+qda.auc <- qda.auc@y.values
+round.qda.auc <- as.numeric(qda.auc)
+round.qda.auc <- round(round.qda.auc*100,2)
+
+##plot ROC curve and overlay the diagonal line for random guessing
+plot(qda.roc.perf, main="ROC Curve for QDA (Binary)", col = "#377eb8", lwd =4) #produces ROC curve
+lines(x = c(0,1), y = c(0,1), col="red") 
+```
+The AUC for the QDA model with binary classification is `r round.qda.auc`%.  
+
+## QDA Original Classification  
+The QDA model using the original data set classification for Class will be referred to as Model 3b.  
+```{r chunk QDA Model 3b}
+set.seed(100)
+#split data
+#Train.org <- createDataPartition(haiti.caret$Class, p = 0.8, list = FALSE, times = 1)
+#train.org <- haiti.caret[Train, ]
+#test.org <- haiti.caret[-Train, ]
+
+#remove binary classification
+#train.org <- train.org[, -5]
+#test.org <- test.org[, -5]
+
+#specify type of training method & number of folds
+#ctrl.org <- trainControl(method = "cv", number = 10, savePredictions = "all", classProbs = FALSE)
+#set random seed
+set.seed(100)
+
+#specify logistic regression model
+model.qda.org <- train(Class ~ Red + Green + Blue,  
+                   data = train.org, 
+                   method = "qda",
+                   trControl = ctrl.org)
+```
+
+Model 3b statistics:  
+```{r chunk Model 3b model statistics}
+print(model.qda.org)
+```
+
+The confusion matrix for Model 3b is:  
+```{r chunk Model 3b testing}
+###apply model to testing
+
+#predict outcome using model from training applied to testing
+pred.qda.org <- predict(model.qda.org, newdata = test.org) #how well does model predict Blue Tarp
+
+#create confusion matrix
+confusionMatrix(data = pred.qda.org, test.org$Class)
+#accuracy: 90.21%
+
+pred.accuracy.qda.org <- round(mean(pred.qda.org == test.org$Class)*100,2)
+```
+
+```{r chunk QDA (original) ROC and AUC}
+library(nnet) #multinomial
+# Classification with logistic regression 
+pred.qda.org <-  predict(model.qda.org, test.org, type = "prob")
+
+# determine the AUC
+multiclass.roc(test.org$Class, pred.qda.org)
+# AUC = 0.9288
+```
+The accuracy for Model 3b is `r pred.accuracy.qda.org`%.  
+We can tell that the accuracy drastically improves when we model QDA using the binary classification versus the original classification. Choosing between the two models, it would be best to use Model 3a.  
+Accuracy Results for QDA:  
+Binary Classification: `r pred.accuracy.qda`%  
+Original Classification: `r pred.accuracy.qda.org`%  
+
+# KNN  
+
+## KNN Original Classification  
+The KNN models will be referred to as Model 4.  
+```{r chunk KNN Model 4a}
+set.seed(100)
+#split data
+#Train.org <- createDataPartition(haiti.caret$Class, p = 0.8, list = FALSE, times = 1)
+#train.org <- haiti.caret[Train, ]
+#test.org <- haiti.caret[-Train, ]
+
+#remove binary classification
+#train.org <- train.org[, -5]
+#test.org <- test.org[, -5]
+
+#check distribution of data
+prop.table(table(train.org$Class))*100
+prop.table(table(test.org$Class))*100
+
+#set trainX set (just predictor variables)
+trainX <- train.org[,-1]
+
+#specify type of training method & number of folds
+#ctrl.org <- trainControl(method = "cv", number = 10, savePredictions = "all", classProbs = FALSE)
+#set random seed
+set.seed(100)
+
+#specify logistic regression model
+model.knn.org <- train(Class ~ Red + Green + Blue,  
+                   data = train.org, 
+                   method = "knn",
+                   trControl = ctrl.org,
+                   tuneLength = 10)
+```
+
+Model 4a statistics:  
+```{r chunk Model 4a model statistics}
+print(model.knn.org)
+```
+
+KNN Plot:  
+```{r chunk Model 4a KNN plot}
+plot(model.knn.org, ylim = c(0.9,1), xlab = "Neighbors", main = "KNN Accuracy Plot")
+```
+
+```{r chunk Model 4a testing}
+#predict outcome using model from training applied to testing
+pred.knn.org <- predict(model.knn.org, newdata = test.org) #how well does model predict Blue Tarp
+
+#create confusion matrix
+confusionMatrix(data = pred.knn.org, test.org$Class)
+#accuracy: 93.13%
+
+pred.accuracy.knn.org <- round(mean(pred.knn.org == test.org$Class)*100,2)
+```
+The accuracy for Model 4a is `r pred.accuracy.knn.org`%.  
+
+```{r chunk KNN (original) ROC and AUC}
+library(nnet) #multinomial
+# Classification with logistic regression 
+pred.knn.org <-  predict(model.knn.org, test.org, type = "prob")
+
+# determine the AUC
+multiclass.roc(test.org$Class, pred.knn.org)
+# AUC = 0.97
+```
+## KNN Binary Classification  
+The KNN model using the binary classification for Class will be referred to as Model 4b.    
+```{r chunk KNN Model 4b}
+set.seed(100)
+#split data
+#Train <- createDataPartition(haiti.caret.bin$BinClass, p = 0.8, list = FALSE, times = 1)
+#train <- haiti.caret.bin[Train, ]
+#test <- haiti.caret.bin[-Train, ]
+
+#specify type of training method & number of folds
+#ctrl <- trainControl(method = "cv", number = 10, savePredictions = "all", classProbs = FALSE)
+#set random seed
+set.seed(100)
+
+#specify knn model
+model.knn <- train(BinClass ~ Red + Green + Blue,  
+                   data = train, 
+                   method = "knn",
+                   trControl = ctrl,
+                   tuneLength = 10)
+
+```
+
+Model 4b statistics:  
+```{r chunk Model 4b model statistics}
+print(model.knn)
+```
+
+KNN Plot (Binary Response):  
+```{r chunk Model 4b KNN plot}
+plot(model.knn, ylim = c(0.97,1), xlab = "Neighbors", main = "KNN Accuracy Plot (Binary Classifier)")
+```
+
+```{r chunk Model 4b testing}
+#predict outcome using model from training applied to testing
+pred.knn <- predict(model.knn, newdata = test) #how well does model predict Blue Tarp
+
+#create confusion matrix
+confusionMatrix(data = pred.knn, test$BinClass)
+#accuracy: 99.68%
+
+pred.accuracy.knn <- round(mean(pred.knn == test$BinClass)*100,2)
+```
+The accuracy for Model 4b is `r pred.accuracy.knn`%.  
+
+```{r chunk KNN ROC and AUC}
+#set seed for partition
+set.seed(100)
+#split data
+#Train.roc <- createDataPartition(haiti$BinClass, p = 0.8, list = FALSE, times = 1)
+#train.roc <- haiti[Train.roc, ]
+#test.roc <- haiti[-Train.roc, ]
+
+library(ROCR)
+
+#create train set with predictors only
+train.X <- train.roc[,-5]
+train.X <- train.X[,-1]
+#create test set with predictors only
+test.X <- test.roc[,-5]
+test.X <- test.X[,-1]
+#create train with response only (BinClass)
+train.Y <- train.roc[ ,5]
+#create test with response only (BinClass)
+test.Y <- test.roc[ ,5]
+
+##########################
+#knn.mod.roc2 <- class::knn(train.X, test.X, train.Y, k = 5, prob = TRUE)
+#knn.prob2 <- attr(knn.mod.roc2, 'prob')
+#knn.prob2 <- 2*ifelse(knn.mod.roc2 == "0", 1-knn.prob2, knn.prob2) - 1
+
+#pred.knn2 <- prediction(knn.prob2, test.Y)
+#perf.knn2 <- performance(pred.knn2, measure = "tpr", x.measure = "fpr")
+
+#plot(perf.knn2, col=2, lwd= 2, lty=2, main=paste('ROC curve for kNN with k=5'))
+#abline(a=0,b=1)
+
+##########################
+#fit knn model with k = 5
+knn.mod.roc <- class::knn(train.X, test.X, train.Y, k = 5, prob = TRUE)
+knn.prob <- attr(knn.mod.roc, 'prob')
+knn.prob <- - 2*ifelse(knn.mod.roc == "0", 1-knn.prob, knn.prob) - 1
+
+#evaluate the model
+pred.knn2 <- prediction(knn.prob, test.Y, label.ordering = c(1,0))
+#store the true positive and false positive rates
+perf.knn <- performance(pred.knn2, measure = "tpr", x.measure = "fpr")
+#plot ROC curve
+plot(perf.knn, col = "#377eb8", lwd =4, main = "ROC Curve for KNN (K = 5)")
+lines(x = c(0,1), y = c(0,1), col="red")
+
+#knn.prob[knn.prob !=0 & knn.prob !=-3]
+#knn.prob[knn.prob == 1]
+#knn.prob[knn.prob == 0]
+
+#AUC
+knn.auc <- performance(pred.knn2, measure = "auc")
+knn.auc <- knn.auc@y.values
+round.knn.auc <- as.numeric(knn.auc)
+round.knn.auc <- round(round.knn.auc*100,2)
+```
+The AUC for the KNN model with K = 5 is `r round.knn.auc`%.  

@@ -1,7 +1,5 @@
 # Earthquake
 
-Haiti_Earthquake_Relief_2010
-
 Analyzing data from Haiti Earthquake Relief Effort from 2010.
 
 Goal: use various classification methods (logistic regression, LDA, QDA, and KNN) to correctly identify pixels labeled as Blue Tarps.

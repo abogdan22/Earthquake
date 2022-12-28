@@ -2,14 +2,14 @@
 
 >This project was completed for the Statistical Learning course (DS 6030) in the University of Virginia's Masters of Science in Data Science Program.
 
-Analyzing data from Haiti Earthquake Relief Effort from 2010.
+**Purpose:** Analyzing data from Haiti Earthquake Relief Effort from 2010.
 
-Goal: use various classification methods (logistic regression, LDA, QDA, KNN, Support Vector Machine, and Random Forest) to correctly identify pixels labeled as Blue Tarps.
-    + Blue tarps were used as makeshift shelters following the destruction from the 2010 Haiti earthquake.
+**Goal:** use various classification methods (logistic regression, LDA, QDA, KNN, Support Vector Machine, and Random Forest) to correctly identify pixels labeled as Blue Tarps.
++ Blue tarps were used as makeshift shelters following the destruction from the 2010 Haiti earthquake.
 
-Software: R and R Studio
+**Software:** R and R Studio
 
-Size of data set:
+**Size** of data set:
 
 + 63,241 observations (train/test data with 80/20 split)
 + 2,008,623 observations (hold-out data)
@@ -22,7 +22,7 @@ According to Wikipedia, the RGB color model is additive. Therefore, the models u
 
 # Results: Best Performing Model
 
-The best performing model based on both the original and hold-out data sets was Logistic Regression. Overall, logistic regression had the best performance metrics on the hold-out data for all four metrics where:
+The best performing model based on both the original and hold-out data sets was **Logistic Regression**. Overall, logistic regression had the best performance metrics on the hold-out data for all four metrics where:
 
 + Accuracy = 99.03%
 + AUC = 0.9994

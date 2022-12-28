@@ -1,6 +1,6 @@
 # Haiti Earthquake Relief Effort: Fidning Blue Tarps
 
-<This project was completed for the Statistical Learning course (DS 6030) in the University of Virginia's Masters of Science in Data Science Program.
+< This project was completed for the Statistical Learning course (DS 6030) in the University of Virginia's Masters of Science in Data Science Program.
 
 Analyzing data from Haiti Earthquake Relief Effort from 2010.
 

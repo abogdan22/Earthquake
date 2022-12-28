@@ -2,9 +2,7 @@
 
 >This project was completed for the Statistical Learning course (DS 6030) in the University of Virginia's Masters of Science in Data Science Program.
 
-**Purpose:** Analyzing data from Haiti Earthquake Relief Effort from 2010.
-
-**Goal:** use various classification methods (logistic regression, LDA, QDA, KNN, Support Vector Machine, and Random Forest) to correctly identify pixels labeled as Blue Tarps.
+**Goal:** Analyzing data from Haiti Earthquake Relief Effort from 2010 using various classification methods (logistic regression, LDA, QDA, KNN, Support Vector Machine, and Random Forest) to identify earthquake survivors via pixels labeled as Blue Tarps.
 + Blue tarps were used as makeshift shelters following the destruction from the 2010 Haiti earthquake.
 
 **Software:** R and R Studio

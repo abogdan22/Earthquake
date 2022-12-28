@@ -22,7 +22,7 @@ According to Wikipedia, the RGB color model is additive. Therefore, the models u
 
 # Results: Best Performing Model
 
-The best performing model based on both the original and hold-out data sets was **Logistic Regression**. Overall, logistic regression had the best performance metrics on the hold-out data for all four metrics where:
+The best performing model based on both the original and hold-out data sets was *Logistic Regression*. Overall, logistic regression had the best performance metrics on the hold-out data for all four metrics where:
 
 + Accuracy = 99.03%
 + AUC = 0.9994
